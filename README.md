@@ -71,8 +71,7 @@ Workflow ada di `.github/workflows/build.yml`. Yang dibutuhkan hanya push folder
 1. Push project ke GitHub (`git push`).
 2. Buka tab **Actions** → pilih workflow **Build APK** → **Run workflow** (atau otomatis jalan saat push/PR ke `main`/`master`).
 3. Tunggu sampai selesai:
-   - **Berhasil** → artifact **`upload-github-debug-apk`** berisi `app-debug.apk` (juga dilampirkan ke
-     *Release* bila Anda push tag `v*`).
+   - **Berhasil** → artifact **`upload-github-debug-apk`** berisi `app-debug.apk`.
    - **Gagal** → artifact **`build-logs`** berisi log lengkap. Ini yang bisa Anda kirimkan ke saya.
 4. Unduh APK: buka halaman run → bagian **Artifacts** → `upload-github-debug-apk`.
 
@@ -85,10 +84,15 @@ Pada halaman run yang gagal, unduh artifact **`build-logs`**. Isinya:
 | `build-errors.txt` | Hanya baris error penting (`e: ...`, `Unresolved reference`, `Caused by`, task FAILED) |
 | `build-tail.txt` | 120 baris terakhir output Gradle |
 | `build-full.log` | Seluruh output build (untuk kasus sulit) |
-| `environment.txt` | Versi Java, Gradle, dan daftar paket SDK |
+| `environment.txt` | Versi Java, Gradle, daftar paket SDK, hasil langkah `setup-android` |
 
 Cara tercepat: kirimkan isi **`build-errors.txt`** + **`build-tail.txt`**; kalau belum cukup, kirim
 **`build-full.log`**.
+
+> Catatan: kalau langkah *Set up Android SDK* gagal, langkah build tidak berjalan sehingga
+> `build-full.log` tidak dibuat dan `build-errors.txt` berisi keterangan singkatnya. Penyebab yang
+> pernah terjadi: `android-actions/setup-android@v3` meminta paket `tools` yang sudah dihapus Google.
+> Sekarang workflow memakai **v4** (default hanya `platform-tools`) plus langkah cadangan manual.
 
 Tambahan otomatis:
 

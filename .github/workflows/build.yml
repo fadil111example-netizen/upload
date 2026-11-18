@@ -32,16 +32,51 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # PENYEBAB KEGAGALAN run #1/#2: setup-android@v3 meminta paket 'tools'
+      # yang sudah dihapus Google, sehingga langkah ini GAGAL dan langkah build
+      # ikut di-skip (build-full.log tidak pernah dibuat).
+      # v4 memperbaikinya: default-nya hanya 'platform-tools'.
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        id: sdk
+        continue-on-error: true
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
-      - name: Siapkan paket Android SDK yang dibutuhkan
+      # Cadangan bila setup-android masih gagal: pasang command-line tools manual,
+      # lalu paket yang dibutuhkan AGP.
+      - name: Pasang paket Android SDK (cadangan)
         shell: bash
-        # Bila langkah ini gagal, AGP tetap bisa mengunduh sendiri (lisensi sudah diterima).
         continue-on-error: true
         run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          set -uo pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}"
+          SDKMANAGER="$(command -v sdkmanager 2>/dev/null || true)"
+          if [ -z "$SDKMANAGER" ] && [ -d "$SDK_ROOT/cmdline-tools" ]; then
+            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | sort | tail -n 1)"
+          fi
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager tidak ditemukan di PATH -> memasang command-line tools manual."
+            mkdir -p "$SDK_ROOT/cmdline-tools"
+            curl -fsSL -o /tmp/cmdline-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+            rm -rf "$SDK_ROOT/cmdline-tools/ct" "$SDK_ROOT/cmdline-tools/latest"
+            mkdir -p "$SDK_ROOT/cmdline-tools/latest"
+            unzip -q -o /tmp/cmdline-tools.zip -d "$SDK_ROOT/cmdline-tools/ct"
+            mv "$SDK_ROOT/cmdline-tools/ct/cmdline-tools/"* "$SDK_ROOT/cmdline-tools/latest/"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+            export ANDROID_HOME="$SDK_ROOT"
+            export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$PATH"
+            echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+            echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+            echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          fi
+          if [ -z "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager tetap tidak ditemukan setelah pemasangan manual."
+            exit 1
+          fi
+          echo "sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0" || "$SDKMANAGER" "platforms;android-35"
 
       - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v5
@@ -75,12 +110,21 @@ jobs:
             gradle --version 2>&1 || true
             echo "---- sdkmanager --list_installed ----"
             sdkmanager --list_installed 2>&1 | tail -40 || true
+            echo "---- setup-android outcome ----"
+            echo "steps.sdk.outcome = ${{ steps.sdk.outcome }}"
+            echo "ANDROID_HOME=${ANDROID_HOME:-<kosong>}"
+            echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<kosong>}"
           } > ci-logs/environment.txt
 
           # Ambil baris error compiler Kotlin/Java + penyebab Gradle.
-          grep -nE '^(e|w): |^> Task .*FAILED|FAILURE: Build failed|error: |Could not (resolve|find|determine)|Execution failed for task|Caused by:|What went wrong|Unresolved reference|Compilation error' \
-            ci-logs/build-full.log > ci-logs/build-errors.txt 2>/dev/null || true
-          echo "(kosong = tidak ada baris error yang cocok)" >> ci-logs/build-errors.txt
+          if [ ! -f ci-logs/build-full.log ]; then
+            echo "build-full.log tidak ada: langkah 'Build debug APK' tidak berjalan." \
+              "(biasanya karena langkah setup SDK/Gradle gagal lebih dulu)." > ci-logs/build-errors.txt
+          else
+            grep -nE '^(e|w): |^> Task .*FAILED|FAILURE: Build failed|error: |Could not (resolve|find|determine)|Execution failed for task|Caused by:|What went wrong|Unresolved reference|Compilation error' \
+              ci-logs/build-full.log > ci-logs/build-errors.txt 2>/dev/null || true
+            echo "(kosong = tidak ada baris error yang cocok)" >> ci-logs/build-errors.txt
+          fi
 
           tail -n 120 ci-logs/build-full.log > ci-logs/build-tail.txt 2>/dev/null || true
           ls -la ci-logs
@@ -91,6 +135,9 @@ jobs:
         run: |
           {
             echo "## Hasil build : ${{ steps.build.outcome }}"
+            echo ""
+            echo "- setup-android: \`${{ steps.sdk.outcome }}\`"
+            echo "- build: \`${{ steps.build.outcome }}\`"
             echo ""
             echo '```'
             head -n 60 ci-logs/build-errors.txt 2>/dev/null || echo "(belum ada ci-logs/build-errors.txt)"
