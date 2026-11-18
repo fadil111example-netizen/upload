@@ -1,0 +1,18 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+app/build/
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Log build yang di-commit otomatis oleh workflow saat gagal (branch ci-logs/*)
+ci-logs/
